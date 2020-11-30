@@ -1,14 +1,15 @@
 const THRESH = 0.25;
-const training = false;
+const EARLY_STOP = 5;
+const training = true;
 
 //Setting up a contex;
 
 let context = {};
-
+console.log(RiTa.STOP_WORDS);
 //Tokenizing functions;
 
 function tokenise(sent){
-    return RiTa.tokenize(sent.toLowerCase()).filter(w => !RiTa.isPunctuation(w));
+    return RiTa.tokenize(sent.toLowerCase()).filter(w => (!RiTa.STOP_WORDS.includes(w)) || w == "?" || w == "!");
 }
 
 function oneHottag(tag, dictionary){
@@ -21,9 +22,13 @@ function processText(sent, dictionary){
       let vect = new Array(Object.keys(dictionary).length).fill(0);
       tokenise(sent).forEach(token =>{
 
-          if (Object.keys(dictionary).includes(RiTa.stem(token))){
-              let idx = dictionary[RiTa.stem(token)];
+          if (Object.keys(dictionary).includes(token)){
+              let idx = dictionary[token];
               vect[idx] = 1
+          }
+          else {
+            idx = dictionary["UNK"];
+            vect["UNK"] = 1;
           }
         });
       return vect
@@ -46,12 +51,11 @@ async function getResults(text, dictionary){
 
 async function response(text, dictionary, userID){
         let results = await getResults(text, dictionary);
-        console.log(results);
+        
         let answer = "I don't think I got you";
         let search = true;
         if (results.length > 0){
         while (search) {
-          console.log("Looping!");
           intents["intents"].forEach(intent =>{
             if (intent['tag'] == results[0][0]){
               if (Object.keys(intent).includes("context_set")){
@@ -68,7 +72,7 @@ async function response(text, dictionary, userID){
                }
              }
            }
-            console.log(context);
+
             return answer;
           }
 
@@ -103,7 +107,7 @@ intents["intents"].forEach(intent => {
   let words = [];
   docs.forEach(d => {
     tokenise(d).forEach(w => {
-      words.push(RiTa.stem(w));
+      words.push(w);
     })
   });
 
@@ -112,8 +116,11 @@ intents["intents"].forEach(intent => {
   let word_to_idx = {};
 
   vocabulary.forEach((val, index) => {
-    word_to_idx[val] = index;
+    word_to_idx[val] = index + 1;
   })
+  word_to_idx["UNK"] = 0;
+
+  console.log(word_to_idx);
 
   let X = [];
   let y = [];
@@ -126,15 +133,36 @@ intents["intents"].forEach(intent => {
         });
       });
 
+      let l = X.length;
+      let size = parseInt(Math.floor(l * 0.9));
+      console.log("Dataset length: " + l);
 
+      let X_tot = tf.tensor2d(X);
+      let y_tot = tf.tensor2d(y);
+
+      let X_train = tf.tensor2d(X.slice(0, size));
+      let y_train = tf.tensor2d(y.slice(0, size));
+      let X_val = tf.tensor2d(X.slice(size, l));
+      let y_val = tf.tensor2d(y.slice(size, l));
 
 
   //Training the model;
   async function train(model){
+  let count = 0;
 
-  for (let i = 0; i < 125; i++){
-     const h = await model.fit(X_train, y_train, {epochs: 20, batchSize : 16});
-     console.log("Accuracy after Epoch: " + i + ": " + h.history.acc[0]);
+  for (let i = 0; i < 1000; i++){
+     const h = await model.fit(X_tot, y_tot, {epochs: 1, validationSplit: 0.2});
+    // console.log(h);
+     let preds = await model.predict(X_val);
+     let acc = h.history.acc[0];
+     let val_acc = h.history.val_acc[0];
+     //let val_acc = await tf.metrics.categoricalAccuracy(y_val, preds).mean().array();
+     console.log("Epoch: " + i + ", Train : " + acc + ", Val: " + val_acc);
+
+     if (acc > 4){
+       count += 1;
+     }
+     if (count > EARLY_STOP) break;
   }
   console.log("Training ended");
   await model.save('downloads://dodomodel');
@@ -148,14 +176,12 @@ intents["intents"].forEach(intent => {
 let model;
 
   if (training){
-    let X_train = tf.tensor2d(X);
-    let y_train = tf.tensor2d(y);
 
     model = tf.sequential();
-    model.add(tf.layers.dense({units: 8, inputShape: [X_train.shape[1]], activation: 'relu'}));
-    model.add(tf.layers.dense({units: 8, activation: 'relu'}));
+    model.add(tf.layers.dense({units: 6, inputShape: [X_train.shape[1]], activation: 'relu'}));
+    model.add(tf.layers.dense({units: 6, activation: 'relu'}));
     model.add(tf.layers.dense({units: tags.length, activation: 'softmax'}));
-    model.compile({optimizer: 'sgd', loss: 'categoricalCrossentropy', metrics: ['accuracy']});
+    model.compile({optimizer: tf.train.adam(0.001), loss: 'categoricalCrossentropy', metrics: ['accuracy']});
     train(model);
   }
   else{

@@ -15,9 +15,9 @@ let time = Math.floor(Date.now() / 1000);
 
     let reply = await response(lastUserMessage, word_to_idx, userID);
 
-              if (reply != ""){
+
               messages.push("<b>" + "Dodo" + ":</b> " + reply);
-            }
+            
                 for (var i = 1; i < 8; i++) {
                     if (messages[messages.length - i])
                       document.getElementById("chatlog" + i).innerHTML = messages[messages.length - i];
